@@ -127,7 +127,7 @@ ompi_coll_base_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, int 
  *
  */
 int
-ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
+ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
                                                   int count,
                                                   struct ompi_datatype_t *dtype,
                                                   struct ompi_op_t *op,
@@ -257,6 +257,112 @@ ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
     }
 
     /* Ensure that the final result is in rbuf */
+    if (tmpsend != rbuf) {
+        ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, tmpsend);
+        if (ret < 0) { line = __LINE__; goto error_hndl; }
+    }
+
+    if (NULL != inplacebuf_free) free(inplacebuf_free);
+    return MPI_SUCCESS;
+
+ error_hndl:
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "%s:%4d\tRank %d Error occurred %d\n",
+                 __FILE__, line, rank, ret));
+    (void)line;  // silence compiler warning
+    if (NULL != inplacebuf_free) free(inplacebuf_free);
+    return ret;
+}
+
+int
+ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
+                                                  int count,
+                                                  struct ompi_datatype_t *dtype,
+                                                  struct ompi_op_t *op,
+                                                  struct ompi_communicator_t *comm,
+                                                  mca_coll_base_module_t *module)
+{
+    int ret, line, rank, size, adjsize, remote, distance;
+    int newrank, newremote, extra_ranks;
+    char *tmpsend = NULL, *tmprecv = NULL, *tmpswap = NULL, *inplacebuf_free = NULL, *inplacebuf;
+    ptrdiff_t span, gap = 0;
+
+    size = ompi_comm_size(comm);
+    rank = ompi_comm_rank(comm);
+
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
+                 "coll:base:allreduce_intra_binary_blocks rank %d", rank));
+
+    /* Special case for size == 1 */
+    if (1 == size) {
+        if (MPI_IN_PLACE != sbuf) {
+            ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
+            if (ret < 0) { line = __LINE__; goto error_hndl; }
+        }
+        return MPI_SUCCESS;
+    }
+
+    /* Allocate and initialize temporary send buffer */
+    span = opal_datatype_span(&dtype->super, count, &gap);
+    inplacebuf_free = (char*) malloc(span);
+    if (NULL == inplacebuf_free) { ret = -1; line = __LINE__; goto error_hndl; }
+    inplacebuf = inplacebuf_free - gap;
+
+    if (MPI_IN_PLACE == sbuf) {
+        ret = ompi_datatype_copy_content_same_ddt(dtype, count, inplacebuf, (char*)rbuf);
+        if (ret < 0) { line = __LINE__; goto error_hndl; }
+    } else {
+        ret = ompi_datatype_copy_content_same_ddt(dtype, count, inplacebuf, (char*)sbuf);
+        if (ret < 0) { line = __LINE__; goto error_hndl; }
+    }
+
+    tmpsend = (char*) inplacebuf;
+    tmprecv = (char*) rbuf;
+
+    /* Determine nearest power of two less than or equal to size */
+    int min_size = size;
+    int block_size = 0;
+    for (int mask = 0x1; mask < size; mask <<= 1) {
+        if ((min_size ^ mask) > min_size) {
+            continue;
+        }
+        min_size ^= mask;
+        if (rank >= min_size) {
+            block_size = mask;
+            break;
+        }
+    }
+
+    /* Communication/Computation loop
+       - Exchange message with remote node.
+       - Perform appropriate operation taking in account order of operations:
+       result = value (op) result
+    */
+    for (distance = 0x1; distance < block_size; distance <<=1) {
+        /* Determine remote node */
+        remote = rank ^ distance;
+
+        /* Exchange the data */
+        ret = ompi_coll_base_sendrecv_actual(tmpsend, count, dtype, remote,
+                                             MCA_COLL_BASE_TAG_ALLREDUCE,
+                                             tmprecv, count, dtype, remote,
+                                             MCA_COLL_BASE_TAG_ALLREDUCE,
+                                             comm, MPI_STATUS_IGNORE);
+        if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
+
+        /* Apply operation */
+        if (rank < remote) {
+            /* tmprecv = tmpsend (op) tmprecv */
+            ompi_op_reduce(op, tmpsend, tmprecv, count, dtype);
+            tmpswap = tmprecv;
+            tmprecv = tmpsend;
+            tmpsend = tmpswap;
+        } else {
+            /* tmpsend = tmprecv (op) tmpsend */
+            ompi_op_reduce(op, tmprecv, tmpsend, count, dtype);
+        }
+    }
+
+    /* Ensure that the final result is in rbuf */  
     if (tmpsend != rbuf) {
         ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, tmpsend);
         if (ret < 0) { line = __LINE__; goto error_hndl; }

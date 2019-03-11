@@ -203,6 +203,7 @@ int ompi_coll_base_allgatherv_intra_two_procs(ALLGATHERV_ARGS);
 /* All Reduce */
 int ompi_coll_base_allreduce_intra_nonoverlapping(ALLREDUCE_ARGS);
 int ompi_coll_base_allreduce_intra_recursivedoubling(ALLREDUCE_ARGS);
+int ompi_coll_base_allreduce_intra_binary_blocks(ALLREDUCE_ARGS);
 int ompi_coll_base_allreduce_intra_ring(ALLREDUCE_ARGS);
 int ompi_coll_base_allreduce_intra_ring_segmented(ALLREDUCE_ARGS, uint32_t segsize);
 int ompi_coll_base_allreduce_intra_basic_linear(ALLREDUCE_ARGS);

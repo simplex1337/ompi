@@ -69,9 +69,9 @@ ompi_coll_tuned_allreduce_intra_dec_dynamic (const void *sbuf, void *rbuf, int c
         ompi_datatype_type_size (dtype, &dsize);
         dsize *= count;
 
-        alg = ompi_coll_tuned_get_target_method_params (tuned_module->com_rules[ALLREDUCE],
-                                                        dsize, &faninout, &segsize, &ignoreme);
-
+        // alg = ompi_coll_tuned_get_target_method_params (tuned_module->com_rules[ALLREDUCE],
+                                                        // dsize, &faninout, &segsize, &ignoreme);
+        alg = 7;
         if (alg) {
             /* we have found a valid choice from the file based rules for this message size */
             return ompi_coll_tuned_allreduce_intra_do_this (sbuf, rbuf, count, dtype, op,
