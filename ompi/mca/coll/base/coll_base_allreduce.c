@@ -57,6 +57,7 @@ ompi_coll_base_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, int 
                                                struct ompi_communicator_t *comm,
                                                mca_coll_base_module_t *module)
 {
+    return;
     int err, rank;
 
     rank = ompi_comm_rank(comm);
@@ -127,13 +128,14 @@ ompi_coll_base_allreduce_intra_nonoverlapping(const void *sbuf, void *rbuf, int 
  *
  */
 int
-ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
+ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
                                                   int count,
                                                   struct ompi_datatype_t *dtype,
                                                   struct ompi_op_t *op,
                                                   struct ompi_communicator_t *comm,
                                                   mca_coll_base_module_t *module)
 {
+    return;
     int ret, line, rank, size, adjsize, remote, distance;
     int newrank, newremote, extra_ranks;
     char *tmpsend = NULL, *tmprecv = NULL, *tmpswap = NULL, *inplacebuf_free = NULL, *inplacebuf;
@@ -273,112 +275,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
     return ret;
 }
 
-int
-ompi_coll_base_allreduce_intra_recursivedoubling(const void *sbuf, void *rbuf,
-                                                  int count,
-                                                  struct ompi_datatype_t *dtype,
-                                                  struct ompi_op_t *op,
-                                                  struct ompi_communicator_t *comm,
-                                                  mca_coll_base_module_t *module)
-{
-    int ret, line, rank, size, adjsize, remote, distance;
-    int newrank, newremote, extra_ranks;
-    char *tmpsend = NULL, *tmprecv = NULL, *tmpswap = NULL, *inplacebuf_free = NULL, *inplacebuf;
-    ptrdiff_t span, gap = 0;
-
-    size = ompi_comm_size(comm);
-    rank = ompi_comm_rank(comm);
-
-    OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
-                 "coll:base:allreduce_intra_binary_blocks rank %d", rank));
-
-    /* Special case for size == 1 */
-    if (1 == size) {
-        if (MPI_IN_PLACE != sbuf) {
-            ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, (char*)sbuf);
-            if (ret < 0) { line = __LINE__; goto error_hndl; }
-        }
-        return MPI_SUCCESS;
-    }
-
-    /* Allocate and initialize temporary send buffer */
-    span = opal_datatype_span(&dtype->super, count, &gap);
-    inplacebuf_free = (char*) malloc(span);
-    if (NULL == inplacebuf_free) { ret = -1; line = __LINE__; goto error_hndl; }
-    inplacebuf = inplacebuf_free - gap;
-
-    if (MPI_IN_PLACE == sbuf) {
-        ret = ompi_datatype_copy_content_same_ddt(dtype, count, inplacebuf, (char*)rbuf);
-        if (ret < 0) { line = __LINE__; goto error_hndl; }
-    } else {
-        ret = ompi_datatype_copy_content_same_ddt(dtype, count, inplacebuf, (char*)sbuf);
-        if (ret < 0) { line = __LINE__; goto error_hndl; }
-    }
-
-    tmpsend = (char*) inplacebuf;
-    tmprecv = (char*) rbuf;
-
-    /* Determine nearest power of two less than or equal to size */
-    int min_size = size;
-    int block_size = 0;
-    for (int mask = 0x1; mask < size; mask <<= 1) {
-        if ((min_size ^ mask) > min_size) {
-            continue;
-        }
-        min_size ^= mask;
-        if (rank >= min_size) {
-            block_size = mask;
-            break;
-        }
-    }
-
-    /* Communication/Computation loop
-       - Exchange message with remote node.
-       - Perform appropriate operation taking in account order of operations:
-       result = value (op) result
-    */
-    for (distance = 0x1; distance < block_size; distance <<=1) {
-        /* Determine remote node */
-        remote = rank ^ distance;
-
-        /* Exchange the data */
-        ret = ompi_coll_base_sendrecv_actual(tmpsend, count, dtype, remote,
-                                             MCA_COLL_BASE_TAG_ALLREDUCE,
-                                             tmprecv, count, dtype, remote,
-                                             MCA_COLL_BASE_TAG_ALLREDUCE,
-                                             comm, MPI_STATUS_IGNORE);
-        if (MPI_SUCCESS != ret) { line = __LINE__; goto error_hndl; }
-
-        /* Apply operation */
-        if (rank < remote) {
-            /* tmprecv = tmpsend (op) tmprecv */
-            ompi_op_reduce(op, tmpsend, tmprecv, count, dtype);
-            tmpswap = tmprecv;
-            tmprecv = tmpsend;
-            tmpsend = tmpswap;
-        } else {
-            /* tmpsend = tmprecv (op) tmpsend */
-            ompi_op_reduce(op, tmprecv, tmpsend, count, dtype);
-        }
-    }
-
-    /* Ensure that the final result is in rbuf */  
-    if (tmpsend != rbuf) {
-        ret = ompi_datatype_copy_content_same_ddt(dtype, count, (char*)rbuf, tmpsend);
-        if (ret < 0) { line = __LINE__; goto error_hndl; }
-    }
-
-    if (NULL != inplacebuf_free) free(inplacebuf_free);
-    return MPI_SUCCESS;
-
- error_hndl:
-    OPAL_OUTPUT((ompi_coll_base_framework.framework_output, "%s:%4d\tRank %d Error occurred %d\n",
-                 __FILE__, line, rank, ret));
-    (void)line;  // silence compiler warning
-    if (NULL != inplacebuf_free) free(inplacebuf_free);
-    return ret;
-}
-
 /*
  *   ompi_coll_base_allreduce_intra_ring
  *
@@ -450,6 +346,7 @@ ompi_coll_base_allreduce_intra_ring(const void *sbuf, void *rbuf, int count,
                                      struct ompi_communicator_t *comm,
                                      mca_coll_base_module_t *module)
 {
+    return;
     int ret, line, rank, size, k, recv_from, send_to, block_count, inbi;
     int early_segcount, late_segcount, split_rank, max_segcount;
     size_t typelng;
@@ -728,6 +625,7 @@ ompi_coll_base_allreduce_intra_ring_segmented(const void *sbuf, void *rbuf, int 
                                                mca_coll_base_module_t *module,
                                                uint32_t segsize)
 {
+    return;
     int ret, line, rank, size, k, recv_from, send_to;
     int early_blockcount, late_blockcount, split_rank;
     int segcount, max_segcount, num_phases, phase, block_count, inbi;
@@ -990,6 +888,7 @@ ompi_coll_base_allreduce_intra_basic_linear(const void *sbuf, void *rbuf, int co
                                              struct ompi_communicator_t *comm,
                                              mca_coll_base_module_t *module)
 {
+    return;
     int err, rank;
 
     rank = ompi_comm_rank(comm);
@@ -1348,4 +1247,206 @@ int ompi_coll_base_allreduce_intra_redscat_allgather(
     return err;
 }
 
+int
+ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
+                                                  int count,
+                                                  struct ompi_datatype_t *dtype,
+                                                  struct ompi_op_t *op,
+                                                  struct ompi_communicator_t *comm,
+                                                  mca_coll_base_module_t *module)
+{
+    int *rindex = NULL, *rcount = NULL, *sindex = NULL, *scount = NULL;
+
+    int comm_size = ompi_comm_size(comm);
+    int rank = ompi_comm_rank(comm);
+    OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
+                 "coll:base:allreduce_intra_redscat_allgather: rank %d/%d",
+                 rank, comm_size));
+
+    /* Find nearest power-of-two less than or equal to comm_size */
+    int nsteps = opal_hibit(comm_size, comm->c_cube_dim + 1);   /* ilog2(comm_size) */
+    assert(nsteps >= 0);
+    int nprocs_pof2 = 1 << nsteps;                              /* flp2(comm_size) */
+
+    if (count < nprocs_pof2 || !ompi_op_is_commute(op)) {
+        OPAL_OUTPUT((ompi_coll_base_framework.framework_output,
+                     "coll:base:allreduce_intra_redscat_allgather: rank %d/%d "
+                     "count %d switching to basic linear allreduce",
+                     rank, comm_size, count));
+        return ompi_coll_base_allreduce_intra_basic_linear(sbuf, rbuf, count, dtype,
+                                                           op, comm, module);
+    }
+
+    int err = MPI_SUCCESS;
+    ptrdiff_t lb, extent, dsize, gap = 0;
+    ompi_datatype_get_extent(dtype, &lb, &extent);
+    dsize = opal_datatype_span(&dtype->super, count, &gap);
+
+    /* Temporary buffer for receiving messages */
+    char *tmp_buf = NULL;
+    char *tmp_buf_raw = (char *)malloc(dsize);
+    if (NULL == tmp_buf_raw)
+        return OMPI_ERR_OUT_OF_RESOURCE;
+    tmp_buf = tmp_buf_raw - gap;
+
+    if (sbuf != MPI_IN_PLACE) {
+        err = ompi_datatype_copy_content_same_ddt(dtype, count, (char *)rbuf,
+                                                  (char *)sbuf);
+        if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+    }
+
+    /*
+     * Step 1. Reduce the number of processes to the nearest lower power of two
+     * p' = 2^{\floor{\log_2 p}} by removing r = p - p' processes.
+     * 1. In the first 2r processes (ranks 0 to 2r - 1), all the even ranks send
+     *    the second half of the input vector to their right neighbor (rank + 1)
+     *    and all the odd ranks send the first half of the input vector to their
+     *    left neighbor (rank - 1).
+     * 2. All 2r processes compute the reduction on their half.
+     * 3. The odd ranks then send the result to their left neighbors
+     *    (the even ranks).
+     *
+     * The even ranks (0 to 2r - 1) now contain the reduction with the input
+     * vector on their right neighbors (the odd ranks). The first r even
+     * processes and the p - 2r last processes are renumbered from
+     * 0 to 2^{\floor{\log_2 p}} - 1.
+     */
+
+    int upper = nsteps, lower, block_size = -1, block_lower = nsteps, 
+        block_upper = nsteps, min_proc, max_proc;
+    for (int i = nsteps, min_proc = 0; i >= 0; i--) {
+        lower = i;
+        max_proc = (1 << i) + min_proc;
+        if(max_proc > comm_size)
+            continue;
+        if (rank < max_proc && block_size == -1) {
+            block_size = 1 << i;
+            block_upper = 1 << upper;
+        } else if(block_size != -1) {
+            block_lower = 1 << lower;
+            break;
+        }
+        min_proc = max_proc;
+        upper = i;
+    }
+    if (block_size < block_lower) {
+        block_lower = 1 << block_size;
+    }
+
+    /*
+     * Step 2. Reduce-scatter implemented with recursive vector halving and
+     * recursive distance doubling. We have p' = 2^{\floor{\log_2 p}}
+     * power-of-two number of processes with new ranks (vrank) and result in rbuf.
+     *
+     * The even-ranked processes send the right half of their buffer to rank + 1
+     * and the odd-ranked processes send the left half of their buffer to
+     * rank - 1. All processes then compute the reduction between the local
+     * buffer and the received buffer. In the next \log_2(p') - 1 steps, the
+     * buffers are recursively halved, and the distance is doubled. At the end,
+     * each of the p' processes has 1 / p' of the total reduction result.
+     */
+    rindex = malloc(sizeof(*rindex) * nsteps);
+    sindex = malloc(sizeof(*sindex) * nsteps);
+    rcount = malloc(sizeof(*rcount) * nsteps);
+    scount = malloc(sizeof(*scount) * nsteps);
+    if (NULL == rindex || NULL == sindex || NULL == rcount || NULL == scount) {
+        err = OMPI_ERR_OUT_OF_RESOURCE;
+        goto cleanup_and_return;
+    }
+
+    int step, wsize;
+    int nprocs_rem = comm_size - nprocs_pof2;
+
+    step = 0;
+    wsize = count;
+    sindex[0] = rindex[0] = 0;
+
+    for (int mask = 1; mask < block_size; mask <<= 1) {
+        /*
+         * On each iteration: rindex[step] = sindex[step] -- begining of the
+         * current window. Length of the current window is storded in wsize.
+         */
+        int dest = rank ^ mask;
+        /* Translate vdest virtual rank to real rank */
+
+        if (rank < dest) {
+            /*
+             * Recv into the left half of the current window, send the right
+             * half of the window to the peer (perform reduce on the left
+             * half of the current window)
+             */
+            rcount[step] = wsize / 2;
+            scount[step] = wsize - rcount[step];
+            sindex[step] = rindex[step] + rcount[step];
+        } else {
+            /*
+             * Recv into the right half of the current window, send the left
+             * half of the window to the peer (perform reduce on the right
+             * half of the current window)
+             */
+            scount[step] = wsize / 2;
+            rcount[step] = wsize - scount[step];
+            rindex[step] = sindex[step] + scount[step];
+        }
+
+        /* Send part of data from the rbuf, recv into the tmp_buf */
+        err = ompi_coll_base_sendrecv((char *)rbuf + (ptrdiff_t)sindex[step] * extent,
+                scount[step], dtype, dest,
+                MCA_COLL_BASE_TAG_ALLREDUCE,
+                (char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
+                rcount[step], dtype, dest,
+                MCA_COLL_BASE_TAG_ALLREDUCE, comm,
+                MPI_STATUS_IGNORE, rank);
+        if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+
+        /* Local reduce: rbuf[] = tmp_buf[] <op> rbuf[] */
+        ompi_op_reduce(op, (char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
+                (char *)rbuf + (ptrdiff_t)rindex[step] * extent,
+                rcount[step], dtype);
+
+        /* Move the current window to the received message */
+        if (step + 1 < nsteps) {
+            rindex[step + 1] = rindex[step];
+            sindex[step + 1] = rindex[step];
+            wsize = rcount[step];
+            step++;
+        }
+    }
+
+    if (block_lower != block_size) {
+        /* This is rank in block */
+        int vrank = rank % block_size;
+        /* Jump to next block plus gap to needed proc */
+        int from = (rank - vrank) + block_size + (vrank % block_lower);
+        err = MCA_PML_CALL(recv((char *)rbuf + (ptrdiff_t)rindex[step] * extent,
+                rcount[step], dtype, from,
+                MCA_COLL_BASE_TAG_ALLREDUCE, comm, NULL));
+        if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+    }
+
+    if (block_upper != block_size) {
+        int block_delta = block_upper / block_size;
+        for (int i = 0; i < block_delta; i++) {
+            int dest = rank - block_upper + i * block_size;
+            err = MCA_PML_CALL(send((char *)sbuf + (ptrdiff_t)sindex[step] * extent,
+                    scount[step], dtype, dest,
+                    MCA_COLL_BASE_TAG_ALLREDUCE, 
+                    MCA_PML_BASE_SEND_STANDARD, comm));
+            if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+        }
+    }
+
+  cleanup_and_return:
+    if (NULL != tmp_buf_raw)
+        free(tmp_buf_raw);
+    if (NULL != rindex)
+        free(rindex);
+    if (NULL != sindex)
+        free(sindex);
+    if (NULL != rcount)
+        free(rcount);
+    if (NULL != scount)
+        free(scount);
+    return err;
+}
 /* copied function (with appropriate renaming) ends here */
