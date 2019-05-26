@@ -38,6 +38,7 @@
 #include "ompi/mca/coll/base/coll_base_functions.h"
 #include "coll_base_topo.h"
 #include "coll_base_util.h"
+#include <string.h>
 
 /*
  * ompi_coll_base_allreduce_intra_nonoverlapping
@@ -1312,7 +1313,7 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
      * 0 to 2^{\floor{\log_2 p}} - 1.
      */
 
-    int upper = nsteps, lower, block_size = -1, block_lower = nsteps, 
+    int upper = nsteps, lower, block_size = -1, block_lower = 1 << nsteps, 
         block_upper = nsteps, min_proc, max_proc;
     for (int i = nsteps, min_proc = 0; i >= 0; i--) {
         lower = i;
@@ -1330,7 +1331,7 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
         upper = i;
     }
     if (block_size < block_lower) {
-        block_lower = 1 << block_size;
+        block_lower = block_size;
     }
 
     /*
@@ -1345,10 +1346,14 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
      * buffers are recursively halved, and the distance is doubled. At the end,
      * each of the p' processes has 1 / p' of the total reduction result.
      */
-    rindex = malloc(sizeof(*rindex) * nsteps);
-    sindex = malloc(sizeof(*sindex) * nsteps);
-    rcount = malloc(sizeof(*rcount) * nsteps);
-    scount = malloc(sizeof(*scount) * nsteps);
+    
+    int block_delta = block_upper / block_size;
+    //int arr_size = nsteps + block_delta;
+    int arr_size = 228;
+    rindex = malloc(sizeof(*rindex) * arr_size);
+    sindex = malloc(sizeof(*sindex) * arr_size);
+    rcount = malloc(sizeof(*rcount) * arr_size);
+    scount = malloc(sizeof(*scount) * arr_size);
     if (NULL == rindex || NULL == sindex || NULL == rcount || NULL == scount) {
         err = OMPI_ERR_OUT_OF_RESOURCE;
         goto cleanup_and_return;
@@ -1413,26 +1418,123 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
         }
     }
 
+    /* Recv from lower block */
     if (block_lower != block_size) {
+        if (block_upper != block_size) {
+            rindex[step] = sindex[step] = rindex[step - 1];
+            rcount[step] = scount[step] = rcount[step - 1];
+        } else {
+            step++;
+            rindex[step] = sindex[step] = rindex[step - 1];
+            rcount[step] = scount[step] = rcount[step - 1];
+            
+        }
         /* This is rank in block */
         int vrank = rank % block_size;
         /* Jump to next block plus gap to needed proc */
         int from = (rank - vrank) + block_size + (vrank % block_lower);
-        err = MCA_PML_CALL(recv((char *)rbuf + (ptrdiff_t)rindex[step] * extent,
+        /*if (rank == 4) {
+            memset(rbuf, 0, dsize);
+            int *ses = rbuf;
+            *ses = rindex[0];
+            *(ses + 1) = rcount[0];
+            *(ses + 2) = rindex[1];
+            *(ses + 3) = rcount[1];
+            *(ses + 4) = rindex[2];
+            *(ses + 5) = rcount[2];
+            return MPI_SUCCESS;
+        }*/
+        err = MCA_PML_CALL(recv((char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
                 rcount[step], dtype, from,
-                MCA_COLL_BASE_TAG_ALLREDUCE, comm, NULL));
+                MCA_COLL_BASE_TAG_ALLREDUCE, comm, MPI_STATUS_IGNORE));
         if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+        ompi_op_reduce(op, (char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
+               (char *)rbuf + (ptrdiff_t)rindex[step] * extent,
+               rcount[step], dtype);
     }
 
+    /* Send to block upper */
     if (block_upper != block_size) {
-        int block_delta = block_upper / block_size;
+    /*
+        int offzet = 0;
         for (int i = 0; i < block_delta; i++) {
-            int dest = rank - block_upper + i * block_size;
-            err = MCA_PML_CALL(send((char *)sbuf + (ptrdiff_t)sindex[step] * extent,
-                    scount[step], dtype, dest,
+            step++;
+            if (i == 0) {
+                scount[step] = wsize / 2;
+                sindex[step] = sindex[step - 1];
+            } else if (i == 1) {
+                scount[step] = wsize - scount[step - 1];
+                sindex[step] = sindex[step - 1] + scount [step - 1];
+            } else {
+                int algo_chooser = (i - 2) % 4;
+                if ((algo_chooser % 2) == 0) {
+                    offzet -= 2; // ?????
+                }
+                if (algo_chooser < 2) {
+                    scount[step] = scount[step - offzet] - scount[step - offzet] / 2;
+                    sindex[step] = sindex[step - offzet] + scount[step - offzet] / 2;
+                } else {
+                    scount[step] = scount[step - offzet] / 4;
+                    sindex[step] = sindex[step - offzet] + scount[step - offzet];
+                }
+            }
+            rindex[step] = sindex[step];
+            rcount[step] = scount[step];
+        }
+        */
+        for (int i = 0; i < block_delta; i++) {
+            int vrank = rank - block_upper + i * block_size;
+        /*
+         * On each iteration: rindex[step] = sindex[step] -- begining of the
+         * current window. Length of the current window is storded in wsize.
+         */
+            int v_rcount, v_scount, v_rindex = 0, v_sindex = 0;
+            int v_wsize = count;
+            for (int mask = 1; mask < block_upper; mask <<= 1) {
+                int dest = vrank ^ mask;
+        /* Translate vdest virtual rank to real rank */
+
+                if (vrank < dest) {
+            /*
+             * Recv into the left half of the current window, send the right
+             * half of the window to the peer (perform reduce on the left
+             * half of the current window)
+             */
+                    v_rcount = v_wsize / 2;
+                    v_scount = v_wsize - v_rcount;
+                    v_sindex = v_rindex + v_rcount;
+                } else {
+            /*
+             * Recv into the right half of the current window, send the left
+             * half of the window to the peer (perform reduce on the right
+             * half of the current window)
+             */
+                    v_scount = v_wsize / 2;
+                    v_rcount = v_wsize - v_scount;
+                    v_rindex = v_sindex + v_scount;
+                }
+
+            /* Send part of data from the rbuf, recv into the tmp_buf */
+
+
+        /* Move the current window to the received message */
+                v_sindex = v_rindex;
+                v_wsize = v_rcount;
+            }
+            rcount[step] = scount[step] = v_rcount;
+            rindex[step] = sindex[step] = v_rindex;
+            err = MCA_PML_CALL(send((char *)rbuf + (ptrdiff_t)v_rindex * extent,
+                    v_rcount, dtype, vrank,
                     MCA_COLL_BASE_TAG_ALLREDUCE, 
                     MCA_PML_BASE_SEND_STANDARD, comm));
             if (MPI_SUCCESS != err) { goto cleanup_and_return; }
+            /*if (vrank == 4) {
+                memset(rbuf, 0, dsize);
+            int *lil = rbuf;
+            *(lil) = v_rindex;
+            *(lil + 1) = v_rcount;
+            }*/
+            step++;
         }
     }
 
