@@ -1357,6 +1357,7 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
 
     int step, wsize;
     int nprocs_rem = comm_size - nprocs_pof2;
+    int nsteps_in_block = opal_hibit(block_size, comm->c_cube_dim + 1);
 
     step = 0;
     wsize = count;
@@ -1422,7 +1423,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
             step++;
             rindex[step] = sindex[step] = rindex[step - 1];
             rcount[step] = scount[step] = rcount[step - 1];
-            
         }
         /* This is rank in block */
         int vrank = rank % block_size;
@@ -1472,24 +1472,22 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
                 v_sindex = v_rindex;
                 v_wsize = v_rcount;
             }
-            rcount[step] = scount[step] = v_rcount;
-            rindex[step] = sindex[step] = v_rindex;
+            // rcount[step] = scount[step] = v_rcount;
+            // rindex[step] = sindex[step] = v_rindex;
             err = MCA_PML_CALL(send((char *)rbuf + (ptrdiff_t)v_rindex * extent,
                     v_rcount, dtype, vrank,
                     MCA_COLL_BASE_TAG_ALLREDUCE, 
                     MCA_PML_BASE_SEND_STANDARD, comm));
             if (MPI_SUCCESS != err) { goto cleanup_and_return; }
             /*if (vrank == 4) {
-                memset(rbuf, 0, dsize);
             int *lil = rbuf;
             *(lil) = v_rindex;
             *(lil + 1) = v_rcount;
             }*/
-            step++;
+            // step++;
         }
     }
 
-    int nsteps_in_block = opal_hibit(block_size, comm->c_cube_dim + 1);
     step = (nsteps_in_block == 0) ? 0 : nsteps_in_block - 1;
     /*if we are highest block*/
     if(block_upper == block_size) {
