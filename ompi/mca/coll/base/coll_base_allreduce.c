@@ -1343,8 +1343,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
      */
     
     int block_delta = block_upper / block_size;
-    //int arr_size = nsteps + block_delta;
-    // int arr_size = 228;
     int arr_size = nsteps;
     rindex = malloc(sizeof(*rindex) * arr_size);
     sindex = malloc(sizeof(*sindex) * arr_size);
@@ -1356,7 +1354,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
     }
 
     int step, wsize;
-    int nprocs_rem = comm_size - nprocs_pof2;
     int nsteps_in_block = opal_hibit(block_size, comm->c_cube_dim + 1);
 
     step = 0;
@@ -1428,17 +1425,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
         int vrank = rank % block_size;
         /* Jump to next block plus gap to needed proc */
         int from = (rank - vrank) + block_size + (vrank % block_lower);
-        /*if (rank == 4) {
-            memset(rbuf, 0, dsize);
-            int *ses = rbuf;
-            *ses = rindex[0];
-            *(ses + 1) = rcount[0];
-            *(ses + 2) = rindex[1];
-            *(ses + 3) = rcount[1];
-            *(ses + 4) = rindex[2];
-            *(ses + 5) = rcount[2];
-            return MPI_SUCCESS;
-        }*/
         err = MCA_PML_CALL(recv((char *)tmp_buf + (ptrdiff_t)rindex[step] * extent,
                 rcount[step], dtype, from,
                 MCA_COLL_BASE_TAG_ALLREDUCE, comm, MPI_STATUS_IGNORE));
@@ -1472,19 +1458,11 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
                 v_sindex = v_rindex;
                 v_wsize = v_rcount;
             }
-            // rcount[step] = scount[step] = v_rcount;
-            // rindex[step] = sindex[step] = v_rindex;
             err = MCA_PML_CALL(send((char *)rbuf + (ptrdiff_t)v_rindex * extent,
                     v_rcount, dtype, vrank,
                     MCA_COLL_BASE_TAG_ALLREDUCE, 
                     MCA_PML_BASE_SEND_STANDARD, comm));
             if (MPI_SUCCESS != err) { goto cleanup_and_return; }
-            /*if (vrank == 4) {
-            int *lil = rbuf;
-            *(lil) = v_rindex;
-            *(lil + 1) = v_rcount;
-            }*/
-            // step++;
         }
     }
 
@@ -1511,14 +1489,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
                 /* send message if we can send 2 messages to each rank in lower block*/
                 if (block_delta_lower == 2 && rank < new_block_size) {
                     int tmp_dest = rank + block_size - ((rank % block_size) > (block_lower - 1)) * block_lower;
-                    //     memset(rbuf, 0, dsize);
-                    //     int *lil = rbuf;
-                    //     *(lil) = tmp_dest;
-                    //     *(lil + 1) = rindex[step];
-                    //     *(lil + 2) = rcount[step];
-                    //     *(lil + 3) = step;
-                    //     *(lil + 4) = new_block_size;
-                    // return MPI_SUCCESS;
                     err = MCA_PML_CALL(send((char *)rbuf + (ptrdiff_t)rindex[step] * extent,
                             rcount[step], dtype, tmp_dest,
                             MCA_COLL_BASE_TAG_ALLREDUCE, 
@@ -1540,8 +1510,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
             }
         }
     } else {
-        /* calculate the offset between last step and needed step */
-        //for(int tmp_block_delta = block_delta; tmp_block_delta == 2; tmp_block_delta /= 2, count_iter++);
         int from = rank - block_upper;
         int from_second = rank - block_upper + block_size;
 
@@ -1558,17 +1526,6 @@ ompi_coll_base_allreduce_intra_binary_blocks(const void *sbuf, void *rbuf,
             l_rindex = 0;
             r_rindex = l_rcount;
         }
-        
-        // memset(rbuf, 0, dsize);
-        //     int *lil = rbuf;
-        //     *(lil) = from;
-        //     *(lil + 1) = from_second;
-        //     *(lil + 2) = l_rindex;
-        //     *(lil + 3) = l_rcount;
-        //     *(lil + 4) = r_rindex;
-        //     *(lil + 5) = r_rcount;
-        //     *(lil + 6) = ses;
-        // return MPI_SUCCESS;
 
         /* recv 2 messages from block upper */
         err = MCA_PML_CALL(recv((char *)rbuf + (ptrdiff_t)l_rindex * extent,
